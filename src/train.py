@@ -34,8 +34,19 @@ class PrintToCameraTrainer:
 
     def __init__(self, config: dict):
         self.config = config
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(f"Using device: {self.device}")
+
+        # Auto-detect device (cuda -> mps -> cpu)
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            logger.info(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+            logger.info(f"CUDA Version: {torch.version.cuda}")
+            logger.info(f"Available VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        elif torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+            logger.info("Using MPS device (Apple Silicon)")
+        else:
+            self.device = torch.device("cpu")
+            logger.info("Using CPU device")
 
         # Set seed
         torch.manual_seed(config['training']['seed'])

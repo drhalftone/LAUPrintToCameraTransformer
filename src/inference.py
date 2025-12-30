@@ -41,8 +41,23 @@ class PrintToCameraPredictor:
             base_model: Base Stable Diffusion model ID
             device: Device to run on (auto-detected if None)
         """
-        self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-        logger.info(f"Using device: {self.device}")
+        # Auto-detect device (cuda -> mps -> cpu)
+        if device:
+            self.device = torch.device(device)
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            self.device = torch.device("cpu")
+
+        if self.device.type == "cuda":
+            logger.info(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+            logger.info(f"CUDA Version: {torch.version.cuda}")
+        elif self.device.type == "mps":
+            logger.info("Using MPS device (Apple Silicon)")
+        else:
+            logger.info(f"Using device: {self.device}")
 
         self.checkpoint_path = Path(checkpoint_path)
         self.base_model = base_model
