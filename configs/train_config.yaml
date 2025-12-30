@@ -1,0 +1,56 @@
+# Print-to-Camera Transformer Training Configuration
+
+# Data settings
+data:
+  data_dir: "./data"
+  original_subdir: "original"
+  captured_subdir: "captured"
+  image_size: 512
+  val_split: 0.1
+
+# Model settings
+model:
+  # Options: "prs-eth/marigold-v1-0" (recommended) or "stabilityai/stable-diffusion-2-1-base"
+  pretrained_model: "prs-eth/marigold-v1-0"
+  use_lora: true
+  lora_rank: 32
+  lora_alpha: 32
+  lora_dropout: 0.0
+  lora_target_modules:
+    - "to_q"
+    - "to_k"
+    - "to_v"
+    - "to_out.0"
+
+# Training settings
+training:
+  output_dir: "./outputs"
+  batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 5.0e-5
+  lr_scheduler: "cosine"
+  lr_warmup_steps: 500
+  max_steps: 20000
+  save_steps: 2000
+  log_steps: 100
+  mixed_precision: "fp16"
+  gradient_checkpointing: true
+  use_8bit_adam: true
+  seed: 42
+
+# Diffusion settings
+diffusion:
+  num_train_timesteps: 1000
+  beta_schedule: "scaled_linear"
+  prediction_type: "epsilon"
+
+# Inference settings (for validation)
+inference:
+  num_inference_steps: 50
+  guidance_scale: 1.0
+
+# Logging
+logging:
+  use_wandb: false
+  project_name: "print-to-camera"
+  run_name: null
