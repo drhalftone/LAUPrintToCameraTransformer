@@ -76,6 +76,12 @@ class PairedImageDataset(Dataset):
             transforms.Normalize([0.5], [0.5]),  # Scale to [-1, 1]
         ])
 
+    def _extract_numeric_id(self, filename: str) -> Optional[str]:
+        """Extract numeric ID from filename (e.g., 'prestineThumbnail00123' -> '00123')."""
+        import re
+        match = re.search(r'(\d+)$', filename)
+        return match.group(1) if match else None
+
     def _find_pairs(self) -> List[Tuple[Path, Path]]:
         """Find matching pairs of original and captured images."""
         pairs = []
@@ -85,19 +91,20 @@ class PairedImageDataset(Dataset):
         if not self.captured_dir.exists():
             raise FileNotFoundError(f"Captured images directory not found: {self.captured_dir}")
 
-        # Get all original images
+        # Get all original images, keyed by numeric ID
         original_files = {}
         for f in self.original_dir.iterdir():
             if f.suffix.lower() in self.SUPPORTED_EXTENSIONS:
-                # Use stem (filename without extension) as key
-                original_files[f.stem.lower()] = f
+                numeric_id = self._extract_numeric_id(f.stem)
+                if numeric_id:
+                    original_files[numeric_id] = f
 
-        # Find matching captured images
+        # Find matching captured images by numeric ID
         for f in self.captured_dir.iterdir():
             if f.suffix.lower() in self.SUPPORTED_EXTENSIONS:
-                stem = f.stem.lower()
-                if stem in original_files:
-                    pairs.append((original_files[stem], f))
+                numeric_id = self._extract_numeric_id(f.stem)
+                if numeric_id and numeric_id in original_files:
+                    pairs.append((original_files[numeric_id], f))
 
         return sorted(pairs, key=lambda x: x[0].stem)
 

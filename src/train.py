@@ -10,13 +10,17 @@ import logging
 import math
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 
 import torch
 import torch.nn.functional as F
 from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
 import yaml
+import numpy as np
+from PIL import Image
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
 
 from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel
 from diffusers.optimization import get_scheduler
@@ -67,6 +71,7 @@ class PrintToCameraTrainer:
 
         # Training state
         self.global_step = 0
+        self.loss_history = []  # List of (step, loss) tuples
 
     def _init_models(self):
         """Initialize VAE, U-Net, and apply LoRA."""
@@ -217,6 +222,183 @@ class PrintToCameraTrainer:
             latents = latents * self.vae.config.scaling_factor
         return latents
 
+    def decode_latents(self, latents: torch.Tensor) -> torch.Tensor:
+        """Decode latents back to images."""
+        with torch.no_grad():
+            latents = latents / self.vae.config.scaling_factor
+            images = self.vae.decode(latents).sample
+            images = (images / 2 + 0.5).clamp(0, 1)
+        return images
+
+    @torch.no_grad()
+    def predict_single(self, input_image: torch.Tensor, num_steps: int = 50) -> torch.Tensor:
+        """Run inference on a single input image."""
+        from diffusers import DDIMScheduler
+
+        self.unet.eval()
+
+        # Setup DDIM scheduler for inference
+        ddim_scheduler = DDIMScheduler.from_config(self.noise_scheduler.config)
+        ddim_scheduler.set_timesteps(num_steps, device=self.device)
+
+        # Encode input
+        input_latents = self.encode_images(input_image)
+        batch_size = input_latents.shape[0]
+
+        # Start from random noise
+        latents = torch.randn_like(input_latents)
+
+        # Text embedding
+        encoder_hidden_states = self.null_text_embedding.expand(batch_size, -1, -1)
+
+        # Denoising loop
+        for t in ddim_scheduler.timesteps:
+            model_input = torch.cat([input_latents, latents], dim=1)
+            timestep = t.expand(batch_size).to(self.device)
+
+            noise_pred = self.unet(
+                model_input,
+                timestep,
+                encoder_hidden_states=encoder_hidden_states,
+                return_dict=False,
+            )[0]
+
+            latents = ddim_scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+
+        # Decode to image
+        output_image = self.decode_latents(latents)
+        self.unet.train()
+        return output_image
+
+    @torch.no_grad()
+    def generate_validation_samples(self, num_samples: int = 4, num_steps: int = 20) -> List[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        """Generate validation samples (input, prediction, ground truth)."""
+        samples = []
+        val_iter = iter(self.val_loader)
+
+        for i in range(min(num_samples, len(self.val_loader.dataset))):
+            try:
+                batch = next(val_iter)
+            except StopIteration:
+                break
+
+            input_img = batch['input_image'][:1].to(self.device)
+            target_img = batch['target_image'][:1].to(self.device)
+
+            # Generate prediction
+            pred_img = self.predict_single(input_img, num_steps=num_steps)
+
+            # Convert to numpy (H, W, C) format
+            input_np = (input_img[0].cpu().permute(1, 2, 0).numpy() * 0.5 + 0.5).clip(0, 1)
+            pred_np = pred_img[0].cpu().permute(1, 2, 0).numpy()
+            target_np = (target_img[0].cpu().permute(1, 2, 0).numpy() * 0.5 + 0.5).clip(0, 1)
+
+            samples.append((input_np, pred_np, target_np))
+
+        return samples
+
+    def create_comparison_grid(self, samples: List[Tuple[np.ndarray, np.ndarray, np.ndarray]]) -> np.ndarray:
+        """Create a grid of input | prediction | ground truth comparisons."""
+        num_samples = len(samples)
+        if num_samples == 0:
+            return np.zeros((100, 300, 3), dtype=np.uint8)
+
+        h, w = samples[0][0].shape[:2]
+        grid_width = w * 3
+        grid_height = h * num_samples
+
+        grid = np.zeros((grid_height, grid_width, 3), dtype=np.float32)
+
+        for i, (inp, pred, target) in enumerate(samples):
+            y_start = i * h
+            grid[y_start:y_start+h, 0:w] = inp
+            grid[y_start:y_start+h, w:2*w] = pred
+            grid[y_start:y_start+h, 2*w:3*w] = target
+
+        return (grid * 255).astype(np.uint8)
+
+    def plot_loss_curve(self, figsize: Tuple[int, int] = (8, 4)) -> np.ndarray:
+        """Plot loss curve and return as numpy array."""
+        fig, ax = plt.subplots(figsize=figsize, dpi=100)
+
+        if len(self.loss_history) > 0:
+            steps, losses = zip(*self.loss_history)
+            ax.plot(steps, losses, 'b-', linewidth=1, alpha=0.7)
+
+            # Add smoothed line
+            if len(losses) > 10:
+                window = min(50, len(losses) // 5)
+                smoothed = np.convolve(losses, np.ones(window)/window, mode='valid')
+                smooth_steps = steps[window-1:]
+                ax.plot(smooth_steps, smoothed, 'r-', linewidth=2, label='Smoothed')
+                ax.legend()
+
+        ax.set_xlabel('Step')
+        ax.set_ylabel('Loss')
+        ax.set_title('Training Loss')
+        ax.grid(True, alpha=0.3)
+
+        # Convert figure to numpy array
+        fig.canvas.draw()
+        img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        plt.close(fig)
+
+        return img
+
+    def save_results_image(self, output_path: Path, num_samples: int = 4):
+        """Save compiled results image with samples and loss curve."""
+        logger.info("Generating validation samples...")
+        samples = self.generate_validation_samples(num_samples=num_samples, num_steps=20)
+
+        # Create comparison grid
+        comparison_grid = self.create_comparison_grid(samples)
+
+        # Create loss curve
+        loss_curve = self.plot_loss_curve()
+
+        # Get dimensions
+        comp_h, comp_w = comparison_grid.shape[:2]
+        loss_h, loss_w = loss_curve.shape[:2]
+
+        # Create labels
+        label_height = 30
+        img_size = samples[0][0].shape[1] if samples else 100
+
+        # Create final image
+        total_width = max(comp_w, loss_w)
+        total_height = label_height + comp_h + 20 + loss_h + 40
+
+        result = np.ones((total_height, total_width, 3), dtype=np.uint8) * 255
+
+        # Create figure for proper text rendering
+        fig, ax = plt.subplots(figsize=(total_width/100, total_height/100), dpi=100)
+        ax.set_xlim(0, total_width)
+        ax.set_ylim(total_height, 0)
+        ax.axis('off')
+
+        # Add column labels
+        ax.text(img_size * 0.5, 20, 'Input', ha='center', va='center', fontsize=12, fontweight='bold')
+        ax.text(img_size * 1.5, 20, 'Prediction', ha='center', va='center', fontsize=12, fontweight='bold')
+        ax.text(img_size * 2.5, 20, 'Ground Truth', ha='center', va='center', fontsize=12, fontweight='bold')
+
+        # Add comparison grid
+        ax.imshow(comparison_grid, extent=[0, comp_w, label_height + comp_h, label_height])
+
+        # Add loss curve
+        loss_y_start = label_height + comp_h + 20
+        ax.imshow(loss_curve, extent=[0, loss_w, loss_y_start + loss_h, loss_y_start])
+
+        # Add step info
+        ax.text(total_width/2, total_height - 10, f'Step: {self.global_step}',
+                ha='center', va='center', fontsize=10)
+
+        # Save
+        fig.savefig(output_path, bbox_inches='tight', pad_inches=0.1, dpi=100)
+        plt.close(fig)
+
+        logger.info(f"Results image saved to {output_path}")
+
     def train_step(self, batch: dict) -> float:
         """Perform a single training step."""
         self.unet.train()
@@ -326,14 +508,20 @@ class PrintToCameraTrainer:
                 lr = self.lr_scheduler.get_last_lr()[0]
                 logger.info(f"Step {self.global_step}: loss={avg_loss:.4f}, lr={lr:.2e}")
                 progress_bar.set_postfix(loss=avg_loss, lr=lr)
+
+                # Record loss history
+                self.loss_history.append((self.global_step, avg_loss))
+
                 running_loss = 0.0
 
-            # Save checkpoint
+            # Save checkpoint and results image
             if self.global_step % save_steps == 0:
                 self.save_checkpoint(output_dir / f"checkpoint-{self.global_step}")
+                self.save_results_image(output_dir / f"results_step_{self.global_step}.png")
 
         progress_bar.close()
         self.save_checkpoint(output_dir / "checkpoint-final")
+        self.save_results_image(output_dir / "results_final.png")
         logger.info("Training complete!")
 
     def save_checkpoint(self, path: Path):
