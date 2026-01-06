@@ -1,5 +1,5 @@
-torch>=2.0.0
-torchvision>=0.15.0
+# torch and torchvision are installed separately with CUDA support
+# see setup_and_train.bat
 diffusers>=0.25.0
 transformers>=4.36.0
 accelerate>=0.25.0

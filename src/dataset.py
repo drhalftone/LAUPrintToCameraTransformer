@@ -17,7 +17,7 @@ from torchvision import transforms
 class PairedImageDataset(Dataset):
     """Dataset for paired original and captured images."""
 
-    SUPPORTED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp'}
+    SUPPORTED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp'}
 
     def __init__(
         self,
@@ -82,9 +82,19 @@ class PairedImageDataset(Dataset):
         match = re.search(r'(\d+)$', filename)
         return match.group(1) if match else None
 
+    def _is_valid_image(self, path: Path) -> bool:
+        """Check if an image file can be opened by PIL."""
+        try:
+            with Image.open(path) as img:
+                img.verify()
+            return True
+        except Exception:
+            return False
+
     def _find_pairs(self) -> List[Tuple[Path, Path]]:
         """Find matching pairs of original and captured images."""
         pairs = []
+        skipped = []
 
         if not self.original_dir.exists():
             raise FileNotFoundError(f"Original images directory not found: {self.original_dir}")
@@ -104,7 +114,15 @@ class PairedImageDataset(Dataset):
             if f.suffix.lower() in self.SUPPORTED_EXTENSIONS:
                 numeric_id = self._extract_numeric_id(f.stem)
                 if numeric_id and numeric_id in original_files:
-                    pairs.append((original_files[numeric_id], f))
+                    orig_path = original_files[numeric_id]
+                    # Validate both images are readable
+                    if self._is_valid_image(orig_path) and self._is_valid_image(f):
+                        pairs.append((orig_path, f))
+                    else:
+                        skipped.append((orig_path.name, f.name))
+
+        if skipped:
+            print(f"Skipped {len(skipped)} corrupted image pairs")
 
         return sorted(pairs, key=lambda x: x[0].stem)
 

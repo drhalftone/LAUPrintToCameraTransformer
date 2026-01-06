@@ -33,8 +33,19 @@ echo Activating virtual environment...
 call venv\Scripts\activate.bat
 
 echo.
-echo Installing requirements...
-pip install --upgrade pip
+echo Upgrading pip...
+python -m pip install --upgrade pip
+
+echo.
+echo Installing PyTorch with CUDA support...
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+if errorlevel 1 (
+    echo WARNING: Failed to install PyTorch with CUDA 12.4, trying CUDA 12.1...
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+)
+
+echo.
+echo Installing remaining requirements...
 pip install -r requirements.txt
 if errorlevel 1 (
     echo ERROR: Failed to install requirements.
