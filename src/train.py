@@ -19,6 +19,8 @@ from tqdm import tqdm
 import yaml
 import numpy as np
 from PIL import Image
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for headless plotting
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
@@ -340,11 +342,10 @@ class PrintToCameraTrainer:
 
         # Convert figure to numpy array
         fig.canvas.draw()
-        img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-        img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        img = np.asarray(fig.canvas.buffer_rgba())[:, :, :3]  # RGBA -> RGB
         plt.close(fig)
 
-        return img
+        return img.copy()
 
     def save_results_image(self, output_path: Path, num_samples: int = 4):
         """Save compiled results image with samples and loss curve."""
