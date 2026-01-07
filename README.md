@@ -1,18 +1,13 @@
 # Print-to-Camera Transformer
 
-Train a model to predict how images will look after being printed on a digital label printer and captured by a machine vision system.
+Train models to transform images between original digital versions and their printed+captured counterparts using a machine vision system.
 
-## Training Approaches
+## Two Directions
 
-This project supports two training approaches:
-
-### 1. Pix2Pix U-Net (Recommended)
-
-A direct image-to-image translation approach using a U-Net encoder-decoder with optional adversarial training. Best for this task as it directly learns the transformation without intermediate steps.
-
-### 2. Diffusion-based (Experimental)
-
-Uses the [Marigold](https://github.com/prs-eth/Marigold) architecture (fine-tuned Stable Diffusion with LoRA). More complex but may capture finer details in some cases.
+| Model | Input | Output | Use Case |
+|-------|-------|--------|----------|
+| **Forward** | Original digital | Simulated print | Preview how images will look after printing |
+| **Reverse** | Captured print | Restored original | Remove print artifacts, color correction |
 
 ## Requirements
 
@@ -22,11 +17,17 @@ Uses the [Marigold](https://github.com/prs-eth/Marigold) architecture (fine-tune
 
 ## Quick Start (Windows)
 
-Run the setup script which handles virtual environment creation and CUDA-enabled PyTorch installation:
-
+### Forward Model (Original → Captured)
 ```batch
-setup_and_train.bat
+train_pix2pix.bat
 ```
+
+### Reverse Model (Captured → Original)
+```batch
+train_pix2pix_reverse.bat
+```
+
+Both scripts handle virtual environment setup, CUDA PyTorch installation, and training automatically.
 
 ## Manual Installation
 
@@ -62,13 +63,27 @@ python src/dataset.py --data_dir ./data
 
 ## Training
 
-### Pix2Pix (Recommended)
+### Forward Model (Original → Captured)
+
+Simulates how images will look after being printed and captured.
 
 ```bash
 python src/train_pix2pix.py --config configs/pix2pix_config.yaml
 ```
 
-**Key Parameters** (`configs/pix2pix_config.yaml`):
+Output: `outputs_pix2pix/`
+
+### Reverse Model (Captured → Original)
+
+Restores captured images back to original quality.
+
+```bash
+python src/train_pix2pix.py --config configs/pix2pix_reverse_config.yaml
+```
+
+Output: `outputs_pix2pix_reverse/`
+
+### Training Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -83,29 +98,11 @@ python src/train_pix2pix.py --config configs/pix2pix_config.yaml
 
 **Memory Usage**: ~6-8GB VRAM for batch size 4
 
-**Training Time**: ~15-20 minutes for 10K steps on RTX 4070 Ti
-
-### Diffusion-based (Experimental)
-
-```bash
-python src/train.py --config configs/train_config.yaml
-```
-
-**Key Parameters** (`configs/train_config.yaml`):
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `batch_size` | 1 | Batch size (1-2 for 12GB VRAM) |
-| `learning_rate` | 5e-5 | Learning rate |
-| `max_steps` | 5000 | Training steps |
-| `lora_rank` | 32 | LoRA rank (higher = more capacity) |
-
-**Memory Usage**: ~10-12GB VRAM for batch size 1
+**Training Time**: ~35 minutes for 10K steps on RTX 4070 Ti
 
 ## Inference
 
-### Pix2Pix Model
-
+### Forward Model
 ```bash
 python src/inference_pix2pix.py \
   --checkpoint ./outputs_pix2pix/checkpoint-final \
@@ -113,26 +110,35 @@ python src/inference_pix2pix.py \
   --output result.png
 ```
 
-### Diffusion Model
-
+### Reverse Model
 ```bash
-python src/inference.py \
-  --checkpoint ./outputs/checkpoint-final \
-  --input image.png \
-  --output result.png
+python src/inference_pix2pix.py \
+  --checkpoint ./outputs_pix2pix_reverse/checkpoint-final \
+  --input captured_image.png \
+  --output restored.png
+```
+
+### Batch Processing
+```bash
+python src/inference_pix2pix.py \
+  --checkpoint ./outputs_pix2pix/checkpoint-final \
+  --input ./input_folder \
+  --output ./output_folder
 ```
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--num_steps` | 50 | DDIM denoising steps (diffusion only) |
-| `--seed` | None | Random seed for reproducibility |
+| `--image_size` | 512 | Processing resolution |
+| `--device` | auto | Device (cuda/cpu) |
 
 ## Output
 
 Training saves results to the output directory:
-- `checkpoint-*/` - Model checkpoints
+- `checkpoint-*/` - Model checkpoints (generator.pt, discriminator.pt)
 - `results_step_*.png` - Validation samples at each checkpoint
 - `results_final.png` - Final validation results with loss curve
+
+Results image columns: **Input | Prediction | Ground Truth**
 
 ## Architecture
 
@@ -142,19 +148,17 @@ Training saves results to the output directory:
 Input (3ch) -> Encoder (64->128->256->512->1024) -> Decoder with skip connections -> Output (3ch)
 ```
 
-- ~31M parameters
-- Direct image-to-image mapping
-- Trained with L1 + Perceptual + Adversarial losses
+- **Generator**: ~31M parameters (U-Net with skip connections)
+- **Discriminator**: ~2.8M parameters (PatchGAN, 70x70 receptive field)
+- **Losses**: L1 (reconstruction) + VGG Perceptual + Adversarial
 
-### Diffusion (Marigold-based)
+### Diffusion-based (Experimental)
 
-Based on [Marigold](https://arxiv.org/abs/2312.02145):
-1. Encode input image to latent space (VAE)
-2. Concatenate with noisy target latent (8 channels)
-3. U-Net denoises toward target
-4. Decode output latent to image
+An alternative approach using Stable Diffusion with LoRA fine-tuning. See `src/train.py` for details.
 
-LoRA fine-tuning trains ~0.76% of parameters for memory efficiency.
+```bash
+python src/train.py --config configs/train_config.yaml
+```
 
 ## License
 
