@@ -55,7 +55,7 @@ def process_image(
 
     # Resize back to original size if needed
     if output_img.size != original_size:
-        output_img = output_img.resize(original_size, Image.BILINEAR)
+        output_img = output_img.resize(original_size, Image.Resampling.BILINEAR)
 
     return output_img
 
@@ -80,6 +80,13 @@ def main():
 
     # Load model
     checkpoint_path = Path(args.checkpoint)
+    if not checkpoint_path.exists():
+        print(f"Error: Checkpoint not found at {checkpoint_path}")
+        return
+    if not (checkpoint_path / "generator.pt").exists():
+        print(f"Error: generator.pt not found in {checkpoint_path}")
+        return
+
     print(f"Loading model from {checkpoint_path}")
     model = load_model(checkpoint_path, device)
 

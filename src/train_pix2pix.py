@@ -14,7 +14,7 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 import yaml
 import numpy as np
@@ -62,7 +62,7 @@ class Pix2PixTrainer:
         self.loss_history = []
 
         # Mixed precision
-        self.scaler = GradScaler() if config['training'].get('mixed_precision') == 'fp16' else None
+        self.scaler = GradScaler('cuda') if config['training'].get('mixed_precision') == 'fp16' else None
 
     def _init_models(self):
         """Initialize generator and discriminator."""
@@ -145,7 +145,7 @@ class Pix2PixTrainer:
         if self.use_gan:
             self.optimizer_d.zero_grad()
 
-            with autocast(enabled=use_amp):
+            with autocast('cuda', enabled=use_amp):
                 # Generate fake images
                 with torch.no_grad():
                     fake_images = self.generator(input_images)
@@ -176,7 +176,7 @@ class Pix2PixTrainer:
         # Train Generator
         self.optimizer_g.zero_grad()
 
-        with autocast(enabled=use_amp):
+        with autocast('cuda', enabled=use_amp):
             fake_images = self.generator(input_images)
 
             # L1 loss (main reconstruction loss)

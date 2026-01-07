@@ -14,7 +14,7 @@ from typing import Optional, List, Tuple
 
 import torch
 import torch.nn.functional as F
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 import yaml
 import numpy as np
@@ -69,7 +69,7 @@ class PrintToCameraTrainer:
         self._init_data()
 
         # Mixed precision
-        self.scaler = GradScaler() if config['training']['mixed_precision'] == 'fp16' else None
+        self.scaler = GradScaler('cuda') if config['training']['mixed_precision'] == 'fp16' else None
 
         # Training state
         self.global_step = 0
@@ -430,7 +430,7 @@ class PrintToCameraTrainer:
 
         # Forward pass
         use_amp = self.config['training']['mixed_precision'] == 'fp16'
-        with autocast(enabled=use_amp):
+        with autocast('cuda', enabled=use_amp):
             noise_pred = self.unet(
                 model_input,
                 timesteps,
