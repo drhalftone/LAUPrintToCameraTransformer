@@ -155,6 +155,8 @@ def get_dataloaders(
     val_split: float = 0.1,
     num_workers: int = 4,
     seed: int = 42,
+    original_subdir: str = "original",
+    captured_subdir: str = "captured",
 ) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
     """
     Create train and validation dataloaders.
@@ -166,12 +168,16 @@ def get_dataloaders(
         val_split: Validation split fraction
         num_workers: Number of dataloader workers
         seed: Random seed
+        original_subdir: Subdirectory for input images
+        captured_subdir: Subdirectory for target images
 
     Returns:
         Tuple of (train_dataloader, val_dataloader)
     """
     train_dataset = PairedImageDataset(
         data_dir=data_dir,
+        original_subdir=original_subdir,
+        captured_subdir=captured_subdir,
         image_size=image_size,
         split="train",
         val_split=val_split,
@@ -180,6 +186,8 @@ def get_dataloaders(
 
     val_dataset = PairedImageDataset(
         data_dir=data_dir,
+        original_subdir=original_subdir,
+        captured_subdir=captured_subdir,
         image_size=image_size,
         split="val",
         val_split=val_split,

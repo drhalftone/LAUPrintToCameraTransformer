@@ -128,6 +128,8 @@ class Pix2PixTrainer:
             val_split=data_config['val_split'],
             num_workers=train_config.get('num_workers', 4),
             seed=train_config['seed'],
+            original_subdir=data_config.get('original_subdir', 'original'),
+            captured_subdir=data_config.get('captured_subdir', 'captured'),
         )
 
         logger.info(f"Training samples: {len(self.train_loader.dataset)}")
