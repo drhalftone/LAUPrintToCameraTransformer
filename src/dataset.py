@@ -157,6 +157,7 @@ def get_dataloaders(
     seed: int = 42,
     original_subdir: str = "original",
     captured_subdir: str = "captured",
+    pin_memory: bool = True,
 ) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
     """
     Create train and validation dataloaders.
@@ -170,6 +171,7 @@ def get_dataloaders(
         seed: Random seed
         original_subdir: Subdirectory for input images
         captured_subdir: Subdirectory for target images
+        pin_memory: Whether to pin memory for CUDA transfers
 
     Returns:
         Tuple of (train_dataloader, val_dataloader)
@@ -199,7 +201,7 @@ def get_dataloaders(
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=pin_memory,
         drop_last=True,
     )
 
@@ -208,7 +210,7 @@ def get_dataloaders(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=pin_memory,
     )
 
     return train_loader, val_loader

@@ -27,7 +27,7 @@ dllau@uky.edu}}
 \maketitle
 
 \begin{abstract}
-Machine vision systems used in print quality inspection face a fundamental challenge: camera-captured images of printed materials exhibit systematic degradations including color shifts, reduced contrast, and scanning artifacts that differ from the original digital source images. This paper presents a deep learning approach using conditional generative adversarial networks (cGANs) to transform raw camera captures back to their original digital appearance. We implement a U-Net based pix2pix architecture with perceptual loss to learn the inverse mapping from captured print images to pristine originals. Our bidirectional training framework enables both forward modeling (predicting print appearance) and reverse restoration (recovering original quality). Experimental results on paired print-capture datasets demonstrate effective artifact removal and color restoration, achieving significant perceptual quality improvements. The system processes 512$\times$512 images in real-time and requires only 35 minutes of training on consumer hardware.
+Machine vision systems used in print quality inspection face a fundamental challenge: camera-captured images of printed materials exhibit systematic degradations including color shifts, reduced contrast, and scanning artifacts that differ from the original digital source images. This paper presents a deep learning approach using conditional generative adversarial networks (cGANs) to transform raw camera captures back to their original digital appearance. We implement a U-Net based pix2pix architecture with perceptual loss to learn the inverse mapping from captured print images to pristine originals. Our bidirectional training framework enables both forward modeling (predicting print appearance) and reverse restoration (recovering original quality). Experimental results on paired print-capture datasets demonstrate effective artifact removal and color restoration, achieving 26.65 dB PSNR and 0.75 SSIM---an 8.6 dB improvement over the best traditional baseline. The system processes 512$\times$512 images in real-time and requires only 35 minutes of training on consumer hardware.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -249,7 +249,7 @@ We use AdamW optimization with learning rate $2 \times 10^{-4}$ and momentum par
 
 Our dataset consists of paired images where each original digital image has a corresponding version that was printed and recaptured using an industrial machine vision camera. The source images are drawn from the Kaggle Dogs vs.\ Cats dataset~\cite{kaggle2013cats}, a widely-used benchmark in CNN research containing natural images of cats and dogs. These images provide diverse content with varying colors, textures, and lighting conditions suitable for evaluating image restoration quality. Images are stored as TIFF files to preserve quality, with pairing established through numeric identifiers in filenames.
 
-All images are resized and center-cropped to 512$\times$512 pixels. Pixel values are normalized to $[-1, 1]$. We use a 90/10 train/validation split with fixed random seed for reproducibility.
+The complete dataset contains 16,193 paired images. All images are resized and center-cropped to 512$\times$512 pixels. Pixel values are normalized to $[-1, 1]$. We use a 90/10 train/validation split with fixed random seed for reproducibility, yielding 14,574 training images and 1,619 validation images.
 
 \subsection{Implementation Details}
 
@@ -281,6 +281,27 @@ Precision & FP16 (mixed) \\
 \end{table}
 
 \subsubsection{Quantitative Analysis}
+
+We evaluate our model on the validation set (1,619 images) using three standard image quality metrics: Peak Signal-to-Noise Ratio (PSNR), Structural Similarity Index (SSIM)~\cite{wang2004ssim}, and Learned Perceptual Image Patch Similarity (LPIPS)~\cite{zhang2018lpips}. We compare against four baseline methods: Identity (no transformation), Reinhard Color Transfer~\cite{reinhard2001color}, per-channel Linear Regression, and Histogram Matching.
+
+\begin{table}[t]
+\centering
+\caption{Quantitative Comparison on Validation Set}
+\label{tab:quantitative}
+\begin{tabular}{lccc}
+\toprule
+Method & PSNR (dB) $\uparrow$ & SSIM $\uparrow$ & LPIPS $\downarrow$ \\
+\midrule
+\textbf{Pix2Pix (Ours)} & \textbf{26.65} & \textbf{0.7454} & \textbf{0.2483} \\
+Channel Regression & 18.07 & 0.4244 & 0.5445 \\
+Histogram Matching & 16.79 & 0.3210 & 0.6099 \\
+Reinhard Color Transfer & 16.43 & 0.3998 & 0.5856 \\
+Identity & 10.59 & 0.1962 & 0.5899 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:quantitative} shows that our method significantly outperforms all baselines across all metrics. Compared to the best traditional baseline (Channel Regression), our model achieves an 8.6 dB improvement in PSNR, a 0.32 improvement in SSIM, and a 0.30 reduction in LPIPS. The large gap between Identity and other methods confirms the substantial degradation introduced by the print-capture process. Traditional color transfer methods partially address color shifts but fail to restore fine details and texture, as evidenced by their high LPIPS scores.
 
 The L1 reconstruction loss decreases consistently during training, from approximately 0.35 at initialization to 0.10 at convergence. The smooth loss curve indicates stable training without mode collapse or oscillation, validating our choice of loss weights and optimization parameters.
 
@@ -321,6 +342,13 @@ The forward model (original $\rightarrow$ captured) learns to simulate print deg
 
 Results at steps 2K, 4K, 6K, 8K, and 10K show progressive improvement in restoration quality. Early checkpoints produce blurry outputs with color inaccuracies. By 6K steps, major artifacts are corrected but fine details remain soft. The final model at 10K steps achieves sharp reconstruction with accurate color and minimal visible artifacts.
 
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig_baseline_comparison.png}
+\caption{Visual comparison of restoration methods on sample validation images. From left to right: Input (camera capture), Reinhard Color Transfer, Channel Regression, Histogram Matching, Pix2Pix (Ours), and Ground Truth (original). Our method produces results most visually similar to the original images, recovering accurate colors and contrast.}
+\label{fig:baseline_comparison}
+\end{figure*}
+
 \subsection{Ablation Studies}
 
 \begin{table}[t]
@@ -349,7 +377,7 @@ Memory usage during training peaks at approximately 6-8GB with batch size 4, mak
 
 \section{Conclusion}
 
-We presented a conditional GAN approach for restoring machine vision camera captures of printed images to their original digital quality. The pix2pix architecture with U-Net generator and PatchGAN discriminator, combined with perceptual and adversarial losses, effectively learns the inverse print-capture transformation from paired training data.
+We presented a conditional GAN approach for restoring machine vision camera captures of printed images to their original digital quality. The pix2pix architecture with U-Net generator and PatchGAN discriminator, combined with perceptual and adversarial losses, effectively learns the inverse print-capture transformation from paired training data. Quantitative evaluation demonstrates significant improvements over traditional baselines, achieving 26.65 dB PSNR and 0.75 SSIM compared to 18.07 dB and 0.42 for the best traditional method.
 
 Our bidirectional framework supports both quality restoration and degradation simulation, enabling applications in print inspection, color management, and data augmentation. The system trains efficiently on consumer hardware and processes images in real-time, making it practical for industrial deployment.
 
@@ -381,6 +409,12 @@ The authors thank the anonymous reviewers for their constructive feedback.
 \bibitem{johnson2016perceptual} J. Johnson, A. Alahi, and L. Fei-Fei, ``Perceptual losses for real-time style transfer and super-resolution,'' in \textit{Proc. Eur. Conf. Comput. Vis. (ECCV)}, 2016, pp. 694--711. [Online]. Available: https://arxiv.org/abs/1603.08155
 
 \bibitem{kaggle2013cats} Kaggle, ``Dogs vs.\ Cats,'' 2013. [Online]. Available: https://www.kaggle.com/c/dogs-vs-cats
+
+\bibitem{wang2004ssim} Z. Wang, A. C. Bovik, H. R. Sheikh, and E. P. Simoncelli, ``Image quality assessment: From error visibility to structural similarity,'' \textit{IEEE Trans. Image Process.}, vol. 13, no. 4, pp. 600--612, Apr. 2004. [Online]. Available: https://ieeexplore.ieee.org/document/1284395
+
+\bibitem{zhang2018lpips} R. Zhang, P. Isola, A. A. Efros, E. Shechtman, and O. Wang, ``The unreasonable effectiveness of deep features as a perceptual metric,'' in \textit{Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, 2018, pp. 586--595. [Online]. Available: https://arxiv.org/abs/1801.03924
+
+\bibitem{reinhard2001color} E. Reinhard, M. Adhikhmin, B. Gooch, and P. Shirley, ``Color transfer between images,'' \textit{IEEE Comput. Graph. Appl.}, vol. 21, no. 5, pp. 34--41, Sep./Oct. 2001. [Online]. Available: https://ieeexplore.ieee.org/document/946629
 \end{thebibliography}
 
 \end{document}

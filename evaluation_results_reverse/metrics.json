@@ -1,0 +1,57 @@
+{
+  "evaluation_date": "2026-01-09T14:30:19.529670",
+  "checkpoint": "outputs_pix2pix_reverse/checkpoint-final",
+  "data_dir": "data",
+  "methods": [
+    {
+      "method_name": "Pix2Pix (Ours)",
+      "psnr": 26.653213159908343,
+      "ssim": 0.745406979169979,
+      "lpips": 0.24831227829347355,
+      "psnr_std": 4.156022859237345,
+      "ssim_std": 0.12330971450346681,
+      "lpips_std": 0.08579489894029867,
+      "n_samples": 1619
+    },
+    {
+      "method_name": "Identity",
+      "psnr": 10.58671234828643,
+      "ssim": 0.19624963623758354,
+      "lpips": 0.5899352417491409,
+      "psnr_std": 1.4554836910460178,
+      "ssim_std": 0.19777544194019267,
+      "lpips_std": 0.08576493290235493,
+      "n_samples": 1619
+    },
+    {
+      "method_name": "Reinhard Color Transfer",
+      "psnr": 16.432885764291857,
+      "ssim": 0.3998235509359267,
+      "lpips": 0.5856037501422913,
+      "psnr_std": 2.468509383522768,
+      "ssim_std": 0.14439839490152132,
+      "lpips_std": 0.08489499728439484,
+      "n_samples": 1619
+    },
+    {
+      "method_name": "Channel Regression",
+      "psnr": 18.065976324127604,
+      "ssim": 0.42444677165162376,
+      "lpips": 0.5444895036799293,
+      "psnr_std": 2.0877070133606908,
+      "ssim_std": 0.13697269760671518,
+      "lpips_std": 0.08254494485775597,
+      "n_samples": 1619
+    },
+    {
+      "method_name": "Histogram Matching",
+      "psnr": 16.785941673445144,
+      "ssim": 0.32103217830301556,
+      "lpips": 0.6099069424070201,
+      "psnr_std": 3.3824183394038254,
+      "ssim_std": 0.15244494302881437,
+      "lpips_std": 0.12092508940294656,
+      "n_samples": 1619
+    }
+  ]
+}

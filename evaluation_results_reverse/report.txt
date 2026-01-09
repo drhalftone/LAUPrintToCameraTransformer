@@ -1,0 +1,20 @@
+Evaluation Report
+Generated: 2026-01-09T14:30:19.531669
+Checkpoint: outputs_pix2pix_reverse/checkpoint-final
+Data: data
+
+================================================================================
+Method                    PSNR (dB)       SSIM            LPIPS          
+--------------------------------------------------------------------------------
+Pix2Pix (Ours)            26.65 +/- 4.16  0.7454 +/- 0.1233 0.2483 +/- 0.0858
+Identity                  10.59 +/- 1.46  0.1962 +/- 0.1978 0.5899 +/- 0.0858
+Reinhard Color Transfer   16.43 +/- 2.47  0.3998 +/- 0.1444 0.5856 +/- 0.0849
+Channel Regression        18.07 +/- 2.09  0.4244 +/- 0.1370 0.5445 +/- 0.0825
+Histogram Matching        16.79 +/- 3.38  0.3210 +/- 0.1524 0.6099 +/- 0.1209
+================================================================================
+
+Notes:
+  - PSNR: Peak Signal-to-Noise Ratio (higher is better)
+  - SSIM: Structural Similarity Index (higher is better)
+  - LPIPS: Learned Perceptual Image Patch Similarity (lower is better)
+  - Samples evaluated: 1619

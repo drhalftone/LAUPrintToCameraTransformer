@@ -47,6 +47,7 @@ class Evaluator:
         image_size: int = 512,
         original_subdir: str = "original",
         captured_subdir: str = "captured",
+        pin_memory: bool = True,
     ):
         """
         Args:
@@ -56,6 +57,7 @@ class Evaluator:
             image_size: Image size for evaluation
             original_subdir: Subdirectory for input images
             captured_subdir: Subdirectory for target images
+            pin_memory: Whether to pin memory for CUDA transfers
         """
         self.device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.metrics = ImageMetrics(device=self.device)
@@ -74,6 +76,7 @@ class Evaluator:
             num_workers=0,  # Avoid multiprocessing issues on Windows
             original_subdir=original_subdir,
             captured_subdir=captured_subdir,
+            pin_memory=pin_memory,
         )
 
         # Initialize baselines
@@ -94,22 +97,30 @@ class Evaluator:
 
         return model
 
-    def fit_baselines(self) -> None:
-        """Fit baseline methods on training data."""
-        print("Fitting baseline methods on training data...")
+    def fit_baselines(self, max_samples: int = 1000) -> None:
+        """Fit baseline methods on training data.
 
-        # Collect training samples
+        Args:
+            max_samples: Maximum number of samples to use for fitting (for memory efficiency)
+        """
+        print(f"Fitting baseline methods on training data (using up to {max_samples} samples)...")
+
+        # Collect training samples (limited for memory)
         inputs_list = []
         targets_list = []
+        count = 0
 
         for batch in tqdm(self.train_loader, desc="Loading training data"):
             inputs_list.append(batch['input_image'])
             targets_list.append(batch['target_image'])
+            count += batch['input_image'].shape[0]
+            if count >= max_samples:
+                break
 
-        inputs = torch.cat(inputs_list, dim=0)
-        targets = torch.cat(targets_list, dim=0)
+        inputs = torch.cat(inputs_list, dim=0)[:max_samples]
+        targets = torch.cat(targets_list, dim=0)[:max_samples]
 
-        print(f"Collected {len(inputs)} training samples")
+        print(f"Collected {len(inputs)} training samples for baseline fitting")
 
         # Fit each baseline
         for baseline in self.baselines:
@@ -290,6 +301,9 @@ def main():
         device = torch.device("cpu")
     print(f"Using device: {device}")
 
+    # Only use pin_memory with CUDA
+    pin_memory = device.type == "cuda"
+
     # Initialize evaluator
     print(f"\nLoading model from {args.checkpoint}")
     print(f"Loading data from {args.data_dir}")
@@ -301,6 +315,7 @@ def main():
         image_size=args.image_size,
         original_subdir=args.original_subdir,
         captured_subdir=args.captured_subdir,
+        pin_memory=pin_memory,
     )
 
     print(f"Training samples: {len(evaluator.train_loader.dataset)}")

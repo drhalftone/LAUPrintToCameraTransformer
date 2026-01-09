@@ -1,0 +1,16 @@
+\begin{table}[h]
+\centering
+\caption{Quantitative comparison of methods}
+\label{tab:results}
+\begin{tabular}{lccc}
+\toprule
+Method & PSNR (dB) $\uparrow$ & SSIM $\uparrow$ & LPIPS $\downarrow$ \\
+\midrule
+Pix2Pix (Ours) & 26.65 & 0.7454 & 0.2483 \\
+Identity & 10.59 & 0.1962 & 0.5899 \\
+Reinhard Color Transfer & 16.43 & 0.3998 & 0.5856 \\
+Channel Regression & 18.07 & 0.4244 & 0.5445 \\
+Histogram Matching & 16.79 & 0.3210 & 0.6099 \\
+\bottomrule
+\end{tabular}
+\end{table}
