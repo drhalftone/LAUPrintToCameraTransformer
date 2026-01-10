@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 
 from unet_model import UNet, PatchDiscriminator, VGGPerceptualLoss
 from dataset import get_dataloaders
+from dataset_fullres import get_fullres_dataloaders
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -121,24 +122,58 @@ class Pix2PixTrainer:
         data_config = self.config['data']
         train_config = self.config['training']
 
-        self.train_loader, self.val_loader = get_dataloaders(
-            data_dir=data_config['data_dir'],
-            batch_size=train_config['batch_size'],
-            image_size=data_config['image_size'],
-            val_split=data_config['val_split'],
-            num_workers=train_config.get('num_workers', 4),
-            seed=train_config['seed'],
-            original_subdir=data_config.get('original_subdir', 'original'),
-            captured_subdir=data_config.get('captured_subdir', 'captured'),
-        )
+        # Check if full resolution mode is enabled
+        self.full_resolution = data_config.get('full_resolution', False)
+
+        if self.full_resolution:
+            logger.info("Using FULL RESOLUTION mode (no resizing)")
+            self.train_loader, self.val_loader = get_fullres_dataloaders(
+                data_dir=data_config['data_dir'],
+                batch_size=train_config['batch_size'],
+                val_split=data_config['val_split'],
+                num_workers=train_config.get('num_workers', 4),
+                seed=train_config['seed'],
+                original_subdir=data_config.get('original_subdir', 'original'),
+                captured_subdir=data_config.get('captured_subdir', 'captured'),
+                max_size=data_config.get('max_size', None),
+                same_size_batching=train_config.get('same_size_batching', True),
+            )
+
+            # Log size distribution
+            sizes = self.train_loader.dataset.sizes
+            widths = [s[0] for s in sizes]
+            heights = [s[1] for s in sizes]
+            logger.info(f"Image width range: {min(widths)} - {max(widths)}")
+            logger.info(f"Image height range: {min(heights)} - {max(heights)}")
+        else:
+            logger.info(f"Using FIXED RESOLUTION mode ({data_config['image_size']}x{data_config['image_size']})")
+            self.train_loader, self.val_loader = get_dataloaders(
+                data_dir=data_config['data_dir'],
+                batch_size=train_config['batch_size'],
+                image_size=data_config['image_size'],
+                val_split=data_config['val_split'],
+                num_workers=train_config.get('num_workers', 4),
+                seed=train_config['seed'],
+                original_subdir=data_config.get('original_subdir', 'original'),
+                captured_subdir=data_config.get('captured_subdir', 'captured'),
+            )
 
         logger.info(f"Training samples: {len(self.train_loader.dataset)}")
         logger.info(f"Validation samples: {len(self.val_loader.dataset)}")
+
+    def _compute_masked_loss(self, pred: torch.Tensor, target: torch.Tensor,
+                              pad_info: list, loss_fn) -> torch.Tensor:
+        """Compute loss only on non-padded regions when pad_info is present."""
+        loss = 0
+        for i, (h, w, pad_h, pad_w) in enumerate(pad_info):
+            loss += loss_fn(pred[i:i+1, :, :h, :w], target[i:i+1, :, :h, :w])
+        return loss / len(pad_info)
 
     def train_step(self, batch: dict) -> dict:
         """Perform a single training step."""
         input_images = batch['input_image'].to(self.device)
         target_images = batch['target_image'].to(self.device)
+        pad_info = batch.get('pad_info', None)  # Present when using variable-size batching
 
         losses = {}
         use_amp = self.scaler is not None
@@ -152,13 +187,13 @@ class Pix2PixTrainer:
                 with torch.no_grad():
                     fake_images = self.generator(input_images)
 
-                # Real loss
+                # For discriminator, we use the full images (including padding)
+                # The discriminator learns to distinguish real vs fake on whatever it sees
                 pred_real = self.discriminator(input_images, target_images)
                 loss_d_real = F.binary_cross_entropy_with_logits(
                     pred_real, torch.ones_like(pred_real)
                 )
 
-                # Fake loss
                 pred_fake = self.discriminator(input_images, fake_images)
                 loss_d_fake = F.binary_cross_entropy_with_logits(
                     pred_fake, torch.zeros_like(pred_fake)
@@ -181,18 +216,26 @@ class Pix2PixTrainer:
         with autocast('cuda', enabled=use_amp):
             fake_images = self.generator(input_images)
 
-            # L1 loss (main reconstruction loss)
-            loss_l1 = F.l1_loss(fake_images, target_images)
+            # L1 loss - mask out padded regions if present
+            if pad_info is not None:
+                loss_l1 = self._compute_masked_loss(fake_images, target_images, pad_info, F.l1_loss)
+            else:
+                loss_l1 = F.l1_loss(fake_images, target_images)
             losses['l1_loss'] = loss_l1.item()
 
-            # Perceptual loss
+            # Perceptual loss - mask out padded regions if present
             if self.use_perceptual:
-                loss_perceptual = self.perceptual_loss(fake_images, target_images)
+                if pad_info is not None:
+                    loss_perceptual = self._compute_masked_loss(
+                        fake_images, target_images, pad_info, self.perceptual_loss
+                    )
+                else:
+                    loss_perceptual = self.perceptual_loss(fake_images, target_images)
                 losses['perceptual_loss'] = loss_perceptual.item()
             else:
                 loss_perceptual = 0
 
-            # GAN loss
+            # GAN loss (uses full images - discriminator output is spatial)
             if self.use_gan:
                 pred_fake = self.discriminator(input_images, fake_images)
                 loss_gan = F.binary_cross_entropy_with_logits(
@@ -313,7 +356,7 @@ class Pix2PixTrainer:
         logger.info(f"Checkpoint saved to {path}")
 
     @torch.no_grad()
-    def generate_samples(self, num_samples: int = 4) -> list:
+    def generate_samples(self, num_samples: int = 4, max_vis_size: int = 512) -> list:
         """Generate validation samples."""
         self.generator.eval()
         samples = []
@@ -328,12 +371,27 @@ class Pix2PixTrainer:
             input_img = batch['input_image'][:1].to(self.device)
             target_img = batch['target_image'][:1].to(self.device)
 
+            # Handle padding info if present (full resolution mode)
+            if 'pad_info' in batch:
+                h, w, _, _ = batch['pad_info'][0]
+                input_img = input_img[:, :, :h, :w]
+                target_img = target_img[:, :, :h, :w]
+
             output_img = self.generator(input_img)
 
             # Convert to numpy [0, 255]
             input_np = ((input_img[0].cpu().numpy().transpose(1, 2, 0) + 1) * 127.5).astype(np.uint8)
             output_np = ((output_img[0].cpu().numpy().transpose(1, 2, 0) + 1) * 127.5).clip(0, 255).astype(np.uint8)
             target_np = ((target_img[0].cpu().numpy().transpose(1, 2, 0) + 1) * 127.5).astype(np.uint8)
+
+            # Scale down large images for visualization
+            h, w = input_np.shape[:2]
+            if max(h, w) > max_vis_size:
+                scale = max_vis_size / max(h, w)
+                new_h, new_w = int(h * scale), int(w * scale)
+                input_np = np.array(Image.fromarray(input_np).resize((new_w, new_h), Image.LANCZOS))
+                output_np = np.array(Image.fromarray(output_np).resize((new_w, new_h), Image.LANCZOS))
+                target_np = np.array(Image.fromarray(target_np).resize((new_w, new_h), Image.LANCZOS))
 
             samples.append((input_np, output_np, target_np))
 
@@ -375,29 +433,36 @@ class Pix2PixTrainer:
             logger.warning("No samples to save")
             return
 
-        # Create comparison grid
-        img_h, img_w = samples[0][0].shape[:2]
-        grid_h = len(samples) * img_h
-        grid_w = 3 * img_w
+        # Find max dimensions across all samples (they may vary in full-res mode)
+        img_h = max(s[0].shape[0] for s in samples)
+        img_w = max(s[0].shape[1] for s in samples)
+
+        grid_h = len(samples) * (img_h + 10) + 10  # Add spacing
+        grid_w = 3 * (img_w + 10) + 10
         grid = np.ones((grid_h, grid_w, 3), dtype=np.uint8) * 255
 
         for i, (inp, out, tgt) in enumerate(samples):
-            y = i * img_h
-            grid[y:y+img_h, 0:img_w] = inp
-            grid[y:y+img_h, img_w:2*img_w] = out
-            grid[y:y+img_h, 2*img_w:3*img_w] = tgt
+            y = 10 + i * (img_h + 10)
+            h, w = inp.shape[:2]
+
+            # Center images if smaller than max
+            x_offset = (img_w - w) // 2
+
+            grid[y:y+h, 10 + x_offset:10 + x_offset + w] = inp
+            grid[y:y+h, 10 + img_w + 10 + x_offset:10 + img_w + 10 + x_offset + w] = out
+            grid[y:y+h, 10 + 2*(img_w + 10) + x_offset:10 + 2*(img_w + 10) + x_offset + w] = tgt
 
         # Create loss curve
         loss_curve = self.plot_loss_curve()
 
         # Combine
-        total_height = grid_h + loss_curve.shape[0] + 60
+        total_height = grid_h + loss_curve.shape[0] + 30
         total_width = max(grid_w, loss_curve.shape[1])
         result = np.ones((total_height, total_width, 3), dtype=np.uint8) * 255
 
-        # Add labels
-        result[30:30+grid_h, :grid_w] = grid
-        result[30+grid_h+30:30+grid_h+30+loss_curve.shape[0], :loss_curve.shape[1]] = loss_curve
+        # Add grid and loss curve
+        result[:grid_h, :grid_w] = grid
+        result[grid_h + 20:grid_h + 20 + loss_curve.shape[0], :loss_curve.shape[1]] = loss_curve
 
         # Save
         Image.fromarray(result).save(output_path)

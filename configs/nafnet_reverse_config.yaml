@@ -1,0 +1,33 @@
+# NAFNet Training Configuration for Reverse (Captured -> Original) Transformation
+# Uses full resolution images without cropping/resizing
+
+# Data settings (SWAPPED for reverse direction)
+data:
+  data_dir: "./data"
+  original_subdir: "captured"      # Input: captured/printed images (swapped)
+  captured_subdir: "original"      # Target: original digital images (swapped)
+  val_split: 0.1
+  max_size: null                   # Set to e.g. 1920 to limit max dimension
+
+# Model settings
+model:
+  variant: "width32"               # Options: "lite", "width32", "width64"
+  use_perceptual: true             # Use VGG perceptual loss
+
+# Training settings
+training:
+  output_dir: "./outputs_nafnet_reverse"
+  batch_size: 1                    # Use 1 for variable-size images, or larger with same_size_batching
+  learning_rate: 1.0e-3            # NAFNet typically uses higher LR
+  max_steps: 10000
+  save_steps: 2000
+  log_steps: 100
+  val_steps: 1000
+  mixed_precision: "fp16"
+  num_workers: 4
+  seed: 42
+  same_size_batching: true         # Group same-size images for efficient batching
+
+  # Loss weights
+  lambda_l1: 1.0                   # L1 reconstruction weight
+  lambda_perceptual: 0.1           # Perceptual loss weight

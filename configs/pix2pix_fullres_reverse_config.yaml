@@ -1,0 +1,36 @@
+# Pix2Pix Training Configuration - FULL RESOLUTION REVERSE
+# Reverse model: Captured -> Original (restoration)
+# Images are processed at their native resolution without cropping/resizing
+
+# Data settings (SWAPPED for reverse direction)
+data:
+  data_dir: "./data"
+  original_subdir: "captured"      # Input: captured/printed images (swapped)
+  captured_subdir: "original"      # Target: original digital images (swapped)
+  full_resolution: true            # Enable full resolution mode
+  max_size: null                   # Set to e.g. 1920 to limit max dimension
+  val_split: 0.1
+
+# Model settings
+model:
+  features: 64          # Base feature channels (64 -> 128 -> 256 -> 512 -> 1024)
+  use_gan: true         # Use PatchGAN discriminator
+  use_perceptual: true  # Use VGG perceptual loss
+
+# Training settings
+training:
+  output_dir: "./outputs_pix2pix_fullres_reverse"
+  batch_size: 1                    # Use 1 for variable-size images
+  learning_rate: 2.0e-4
+  max_steps: 10000
+  save_steps: 2000
+  log_steps: 100
+  mixed_precision: "fp16"
+  num_workers: 4
+  seed: 42
+  same_size_batching: true         # Group same-size images for efficient batching
+
+  # Loss weights
+  lambda_l1: 100.0          # L1 reconstruction weight (high = sharper)
+  lambda_perceptual: 10.0   # Perceptual loss weight
+  lambda_gan: 1.0           # Adversarial loss weight
