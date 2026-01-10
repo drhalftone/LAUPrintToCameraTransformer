@@ -15,8 +15,9 @@ Train models to transform images between original digital versions and their pri
 |--------------|------------|-----|------------|----------|
 | **Pix2Pix** | Fixed (512×512) or Full | Yes | ~34M | High perceptual quality |
 | **NAFNet** | Full resolution | No | ~17M | Stable training, any image size |
+| **Diffusion** | Fixed (512×512) | No | ~860M (LoRA: ~1.6M) | Experimental, generative approach |
 
-Both architectures now support **full resolution** processing - no cropping or resizing required.
+Pix2Pix and NAFNet support **full resolution** processing - no cropping or resizing required.
 
 ## Requirements
 
@@ -373,11 +374,55 @@ NAFNet achieves state-of-the-art results on image restoration benchmarks with a 
 
 ### Diffusion-based (Experimental)
 
-An alternative approach using Stable Diffusion with LoRA fine-tuning. See `src/train.py` for details.
+An alternative approach using Stable Diffusion with LoRA fine-tuning and Marigold-style conditioning. The model concatenates input image latents with noisy target latents, learning to denoise conditioned on the input.
+
+```
+Input latent (4ch) + Noisy target latent (4ch) -> U-Net -> Denoised target latent (4ch) -> VAE Decode -> Output
+```
+
+- **Base Model**: Marigold v1.0 (fine-tuned SD 2.1 for image-to-image)
+- **Fine-tuning**: LoRA adapters on attention layers (~1.6M trainable params)
+- **Conditioning**: 8-channel input (concatenated latents)
+- **Losses**: Noise prediction + Latent reconstruction (L1) + VGG Perceptual
+- **Resolution**: Fixed 512×512
 
 ```bash
 python src/train.py --config configs/train_config.yaml
 ```
+
+Output: `outputs/`
+
+#### Diffusion Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `batch_size` | 1 | Batch size |
+| `gradient_accumulation_steps` | 8 | Effective batch = batch_size × this |
+| `learning_rate` | 5e-5 | Learning rate |
+| `max_steps` | 5000 | Training steps |
+| `lora_rank` | 32 | LoRA rank (higher = more capacity) |
+| `use_latent_recon` | true | Direct latent reconstruction loss |
+| `use_perceptual` | true | VGG perceptual loss |
+| `lambda_noise` | 1.0 | Noise prediction loss weight |
+| `lambda_latent_recon` | 1.0 | Latent reconstruction loss weight |
+| `lambda_perceptual` | 0.1 | Perceptual loss weight |
+| `prediction_type` | epsilon | Options: `epsilon`, `v_prediction` |
+
+#### Pix2Pix-style Improvements
+
+The diffusion training incorporates lessons from Pix2Pix's success:
+
+1. **Direct Latent Reconstruction**: L1 loss between predicted clean latent and target latent provides direct supervision (like Pix2Pix's L1 loss)
+
+2. **Perceptual Loss**: VGG feature matching in pixel space for perceptual quality (computed every 4 steps to save memory)
+
+3. **Deterministic Inference**: DDIM with η=0 produces consistent, reproducible outputs
+
+4. **Fewer Inference Steps**: 20 steps instead of 50 for faster generation with minimal quality loss
+
+**Memory Usage**: ~10-12GB VRAM with gradient checkpointing and 8-bit Adam
+
+**Reference**: Ke et al. "Repurposing Diffusion-Based Image Generators for Monocular Depth Estimation" (Marigold, CVPR 2024)
 
 ## License
 
