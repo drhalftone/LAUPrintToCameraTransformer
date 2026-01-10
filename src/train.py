@@ -3,6 +3,12 @@ Print-to-Camera Transformer Training Script.
 
 Fine-tunes Stable Diffusion using LoRA with Marigold-style conditioning
 to predict printed+captured appearance from original images.
+
+Enhanced with Pix2Pix-style losses:
+- Direct latent reconstruction loss (L1)
+- Perceptual loss (VGG features)
+- Support for v-prediction
+- Fewer inference steps
 """
 
 import argparse
@@ -13,6 +19,7 @@ from pathlib import Path
 from typing import Optional, List, Tuple
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.amp import autocast, GradScaler
 from tqdm import tqdm
@@ -30,6 +37,7 @@ from peft import LoraConfig, get_peft_model
 from transformers import CLIPTextModel, CLIPTokenizer
 
 from dataset import get_dataloaders
+from unet_model import VGGPerceptualLoss
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -67,6 +75,23 @@ class PrintToCameraTrainer:
 
         # Initialize dataloaders
         self._init_data()
+
+        # Initialize perceptual loss if enabled
+        loss_config = config.get('loss', {})
+        self.use_perceptual = loss_config.get('use_perceptual', True)
+        self.use_latent_recon = loss_config.get('use_latent_recon', True)
+
+        if self.use_perceptual:
+            self.perceptual_loss = VGGPerceptualLoss().to(self.device)
+            logger.info("Using VGG perceptual loss")
+
+        # Loss weights
+        self.lambda_noise = loss_config.get('lambda_noise', 1.0)
+        self.lambda_latent_recon = loss_config.get('lambda_latent_recon', 1.0)
+        self.lambda_perceptual = loss_config.get('lambda_perceptual', 0.1)
+        self.perceptual_every = loss_config.get('perceptual_every', 4)  # Compute perceptual every N steps
+
+        logger.info(f"Loss weights: noise={self.lambda_noise}, latent_recon={self.lambda_latent_recon}, perceptual={self.lambda_perceptual}")
 
         # Mixed precision
         self.scaler = GradScaler('cuda') if config['training']['mixed_precision'] == 'fp16' else None
@@ -233,8 +258,25 @@ class PrintToCameraTrainer:
         return images
 
     @torch.no_grad()
-    def predict_single(self, input_image: torch.Tensor, num_steps: int = 50) -> torch.Tensor:
-        """Run inference on a single input image."""
+    def predict_single(
+        self,
+        input_image: torch.Tensor,
+        num_steps: int = 20,
+        deterministic: bool = True,
+        seed: int = None,
+    ) -> torch.Tensor:
+        """
+        Run inference on a single input image.
+
+        Args:
+            input_image: Input tensor (B, C, H, W) in [-1, 1]
+            num_steps: Number of denoising steps (fewer = faster, 10-20 recommended)
+            deterministic: If True, use DDIM with eta=0 for reproducible output
+            seed: Random seed for noise (only used if deterministic=False or for initial noise)
+
+        Returns:
+            Output image tensor (B, C, H, W) in [0, 1]
+        """
         from diffusers import DDIMScheduler
 
         self.unet.eval()
@@ -247,11 +289,18 @@ class PrintToCameraTrainer:
         input_latents = self.encode_images(input_image)
         batch_size = input_latents.shape[0]
 
-        # Start from random noise
-        latents = torch.randn_like(input_latents)
+        # Start from random noise (with optional seed for reproducibility)
+        if seed is not None:
+            generator = torch.Generator(device=self.device).manual_seed(seed)
+            latents = torch.randn(input_latents.shape, generator=generator, device=self.device, dtype=input_latents.dtype)
+        else:
+            latents = torch.randn_like(input_latents)
 
         # Text embedding
         encoder_hidden_states = self.null_text_embedding.expand(batch_size, -1, -1)
+
+        # DDIM eta: 0 = deterministic, 1 = stochastic (like DDPM)
+        eta = 0.0 if deterministic else 1.0
 
         # Denoising loop
         for t in ddim_scheduler.timesteps:
@@ -265,7 +314,11 @@ class PrintToCameraTrainer:
                 return_dict=False,
             )[0]
 
-            latents = ddim_scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+            latents = ddim_scheduler.step(
+                noise_pred, t, latents,
+                eta=eta,
+                return_dict=False
+            )[0]
 
         # Decode to image
         output_image = self.decode_latents(latents)
@@ -273,8 +326,20 @@ class PrintToCameraTrainer:
         return output_image
 
     @torch.no_grad()
-    def generate_validation_samples(self, num_samples: int = 4, num_steps: int = 20) -> List[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
-        """Generate validation samples (input, prediction, ground truth)."""
+    def generate_validation_samples(
+        self,
+        num_samples: int = 4,
+        num_steps: int = 20,
+        deterministic: bool = True,
+    ) -> List[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        """
+        Generate validation samples (input, prediction, ground truth).
+
+        Args:
+            num_samples: Number of samples to generate
+            num_steps: Number of denoising steps
+            deterministic: Use deterministic inference for reproducible results
+        """
         samples = []
         val_iter = iter(self.val_loader)
 
@@ -287,8 +352,13 @@ class PrintToCameraTrainer:
             input_img = batch['input_image'][:1].to(self.device)
             target_img = batch['target_image'][:1].to(self.device)
 
-            # Generate prediction
-            pred_img = self.predict_single(input_img, num_steps=num_steps)
+            # Generate prediction (use consistent seed for reproducible validation)
+            pred_img = self.predict_single(
+                input_img,
+                num_steps=num_steps,
+                deterministic=deterministic,
+                seed=42 + i  # Different but reproducible seed per sample
+            )
 
             # Convert to numpy (H, W, C) format
             input_np = (input_img[0].cpu().permute(1, 2, 0).numpy() * 0.5 + 0.5).clip(0, 1)
@@ -400,8 +470,41 @@ class PrintToCameraTrainer:
 
         logger.info(f"Results image saved to {output_path}")
 
-    def train_step(self, batch: dict) -> float:
-        """Perform a single training step."""
+    def _get_predicted_clean_latent(
+        self,
+        noisy_latents: torch.Tensor,
+        noise_pred: torch.Tensor,
+        timesteps: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Compute the predicted clean latent from noise prediction.
+
+        For epsilon-prediction: x0 = (xt - sqrt(1-alpha_t) * eps) / sqrt(alpha_t)
+        For v-prediction: x0 = sqrt(alpha_t) * xt - sqrt(1-alpha_t) * v
+        """
+        alphas_cumprod = self.noise_scheduler.alphas_cumprod.to(self.device)
+
+        # Get alpha values for each timestep in batch
+        alpha_t = alphas_cumprod[timesteps].view(-1, 1, 1, 1)
+        sqrt_alpha_t = torch.sqrt(alpha_t)
+        sqrt_one_minus_alpha_t = torch.sqrt(1 - alpha_t)
+
+        prediction_type = self.noise_scheduler.config.prediction_type
+
+        if prediction_type == "epsilon":
+            # x0 = (xt - sqrt(1-alpha_t) * eps) / sqrt(alpha_t)
+            pred_clean = (noisy_latents - sqrt_one_minus_alpha_t * noise_pred) / sqrt_alpha_t
+        elif prediction_type == "v_prediction":
+            # x0 = sqrt(alpha_t) * xt - sqrt(1-alpha_t) * v
+            pred_clean = sqrt_alpha_t * noisy_latents - sqrt_one_minus_alpha_t * noise_pred
+        else:
+            # For "sample" prediction type, the model directly predicts x0
+            pred_clean = noise_pred
+
+        return pred_clean
+
+    def train_step(self, batch: dict) -> dict:
+        """Perform a single training step with Pix2Pix-style losses."""
         self.unet.train()
 
         input_images = batch['input_image'].to(self.device)
@@ -430,6 +533,8 @@ class PrintToCameraTrainer:
 
         # Forward pass
         use_amp = self.config['training']['mixed_precision'] == 'fp16'
+        losses = {}
+
         with autocast('cuda', enabled=use_amp):
             noise_pred = self.unet(
                 model_input,
@@ -438,10 +543,71 @@ class PrintToCameraTrainer:
                 return_dict=False,
             )[0]
 
-            # Compute loss (predict noise)
-            loss = F.mse_loss(noise_pred, noise, reduction="mean")
+            # === Loss 1: Noise prediction loss (original diffusion loss) ===
+            prediction_type = self.noise_scheduler.config.prediction_type
+            if prediction_type == "epsilon":
+                target = noise
+            elif prediction_type == "v_prediction":
+                # v = sqrt(alpha_t) * eps - sqrt(1-alpha_t) * x0
+                alphas_cumprod = self.noise_scheduler.alphas_cumprod.to(self.device)
+                alpha_t = alphas_cumprod[timesteps].view(-1, 1, 1, 1)
+                target = torch.sqrt(alpha_t) * noise - torch.sqrt(1 - alpha_t) * target_latents
+            else:
+                target = target_latents  # sample prediction
 
-        return loss
+            loss_noise = F.mse_loss(noise_pred, target, reduction="mean")
+            losses['noise'] = loss_noise.item()
+
+            # === Loss 2: Direct latent reconstruction loss (Pix2Pix-style) ===
+            if self.use_latent_recon:
+                pred_clean_latent = self._get_predicted_clean_latent(
+                    noisy_target_latents, noise_pred, timesteps
+                )
+                loss_latent_recon = F.l1_loss(pred_clean_latent, target_latents)
+                losses['latent_recon'] = loss_latent_recon.item()
+            else:
+                loss_latent_recon = 0
+
+            # === Loss 3: Perceptual loss (decoded images) ===
+            # Only compute periodically to save memory/compute
+            if self.use_perceptual and (self.global_step % self.perceptual_every == 0):
+                # Decode predicted clean latent to image space
+                with torch.no_grad():
+                    pred_clean_latent_detached = pred_clean_latent.detach() if self.use_latent_recon else \
+                        self._get_predicted_clean_latent(noisy_target_latents, noise_pred, timesteps)
+
+                # Decode with gradient for backprop
+                pred_images = self.decode_latents_with_grad(pred_clean_latent)
+
+                # Target images are in [-1, 1], convert to [0, 1] for VGG
+                target_images_01 = (target_images + 1) / 2
+
+                # VGG expects images in [-1, 1], so convert pred back
+                pred_images_norm = pred_images * 2 - 1
+                target_images_norm = target_images_01 * 2 - 1
+
+                loss_perceptual = self.perceptual_loss(pred_images_norm, target_images_norm)
+                losses['perceptual'] = loss_perceptual.item()
+            else:
+                loss_perceptual = 0
+
+            # === Combined loss ===
+            total_loss = (
+                self.lambda_noise * loss_noise +
+                self.lambda_latent_recon * loss_latent_recon +
+                self.lambda_perceptual * loss_perceptual
+            )
+            losses['total'] = total_loss.item()
+
+        return total_loss, losses
+
+    def decode_latents_with_grad(self, latents: torch.Tensor) -> torch.Tensor:
+        """Decode latents to images WITH gradient (for perceptual loss backprop)."""
+        latents = latents / self.vae.config.scaling_factor
+        # Use VAE decoder but allow gradients through
+        images = self.vae.decode(latents).sample
+        images = (images / 2 + 0.5).clamp(0, 1)
+        return images
 
     def train(self):
         """Main training loop."""
@@ -452,14 +618,16 @@ class PrintToCameraTrainer:
         log_steps = self.config['training']['log_steps']
         save_steps = self.config['training']['save_steps']
 
-        logger.info("Starting training...")
+        logger.info("Starting training with Pix2Pix-style losses...")
         logger.info(f"  Max steps: {self.max_steps}")
         logger.info(f"  Batch size: {self.config['training']['batch_size']}")
         logger.info(f"  Gradient accumulation: {gradient_accumulation_steps}")
         logger.info(f"  Effective batch size: {self.config['training']['batch_size'] * gradient_accumulation_steps}")
+        logger.info(f"  Latent reconstruction loss: {self.use_latent_recon}")
+        logger.info(f"  Perceptual loss: {self.use_perceptual} (every {self.perceptual_every} steps)")
 
         progress_bar = tqdm(total=self.max_steps, desc="Training")
-        running_loss = 0.0
+        running_losses = {}
         accumulated_loss = 0.0
 
         # Infinite data iterator
@@ -473,12 +641,16 @@ class PrintToCameraTrainer:
         while self.global_step < self.max_steps:
             batch = next(data_iter)
 
-            # Training step
-            loss = self.train_step(batch)
+            # Training step - now returns (loss_tensor, losses_dict)
+            loss, losses = self.train_step(batch)
 
             # Scale loss for gradient accumulation
             loss = loss / gradient_accumulation_steps
-            accumulated_loss += loss.item()
+            accumulated_loss += losses.get('total', loss.item())
+
+            # Accumulate individual losses for logging
+            for k, v in losses.items():
+                running_losses[k] = running_losses.get(k, 0) + v
 
             # Backward pass
             if self.scaler is not None:
@@ -489,15 +661,16 @@ class PrintToCameraTrainer:
             # Optimizer step (after accumulation)
             if (self.global_step + 1) % gradient_accumulation_steps == 0:
                 if self.scaler is not None:
+                    self.scaler.unscale_(self.optimizer)
+                    torch.nn.utils.clip_grad_norm_(self.unet.parameters(), max_norm=1.0)
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
                 else:
+                    torch.nn.utils.clip_grad_norm_(self.unet.parameters(), max_norm=1.0)
                     self.optimizer.step()
 
                 self.lr_scheduler.step()
                 self.optimizer.zero_grad()
-
-                running_loss += accumulated_loss
                 accumulated_loss = 0.0
 
             self.global_step += 1
@@ -505,15 +678,18 @@ class PrintToCameraTrainer:
 
             # Logging
             if self.global_step % log_steps == 0:
-                avg_loss = running_loss / log_steps
+                avg_losses = {k: v / log_steps for k, v in running_losses.items()}
                 lr = self.lr_scheduler.get_last_lr()[0]
-                logger.info(f"Step {self.global_step}: loss={avg_loss:.4f}, lr={lr:.2e}")
-                progress_bar.set_postfix(loss=avg_loss, lr=lr)
 
-                # Record loss history
-                self.loss_history.append((self.global_step, avg_loss))
+                # Build log string
+                loss_str = ", ".join(f"{k}={v:.4f}" for k, v in avg_losses.items())
+                logger.info(f"Step {self.global_step}: {loss_str}, lr={lr:.2e}")
+                progress_bar.set_postfix(**avg_losses, lr=lr)
 
-                running_loss = 0.0
+                # Record loss history (use total loss)
+                self.loss_history.append((self.global_step, avg_losses.get('total', avg_losses.get('noise', 0))))
+
+                running_losses = {}
 
             # Save checkpoint and results image
             if self.global_step % save_steps == 0:

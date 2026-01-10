@@ -42,12 +42,27 @@ training:
 diffusion:
   num_train_timesteps: 1000
   beta_schedule: "scaled_linear"
-  prediction_type: "epsilon"
+  prediction_type: "epsilon"  # Options: "epsilon", "v_prediction"
+
+# Loss settings (Pix2Pix-style improvements)
+loss:
+  # Latent reconstruction loss (L1 in latent space)
+  use_latent_recon: true
+  lambda_latent_recon: 1.0
+
+  # Perceptual loss (VGG features in pixel space)
+  use_perceptual: true
+  lambda_perceptual: 0.1
+  perceptual_every: 4  # Compute every N steps to save memory
+
+  # Noise prediction loss (original diffusion loss)
+  lambda_noise: 1.0
 
 # Inference settings (for validation)
 inference:
-  num_inference_steps: 50
+  num_inference_steps: 20  # Fewer steps with DDIM
   guidance_scale: 1.0
+  deterministic: true  # Use DDIM with eta=0 for reproducible results
 
 # Logging
 logging:
