@@ -1,0 +1,84 @@
+\begin{thebibliography}{10}
+
+\bibitem{isola2017pix2pix}
+Phillip Isola, Jun-Yan Zhu, Tinghui Zhou, and Alexei~A. Efros,
+\newblock ``Image-to-image translation with conditional adversarial networks,''
+\newblock in {\em IEEE Conference on Computer Vision and Pattern Recognition
+  (CVPR)}, 2017, pp. 1125--1134.
+
+\bibitem{zhu2017unpaired}
+Jun-Yan Zhu, Taesung Park, Phillip Isola, and Alexei~A. Efros,
+\newblock ``Unpaired image-to-image translation using cycle-consistent
+  adversarial networks,''
+\newblock in {\em IEEE International Conference on Computer Vision (ICCV)},
+  2017, pp. 2223--2232.
+
+\bibitem{chen2018attention}
+Xinyuan Chen, Chang Xu, Xiaokang Yang, and Dacheng Tao,
+\newblock ``Attention-gan for object transfiguration in wild images,''
+\newblock in {\em European Conference on Computer Vision (ECCV)}, 2018, pp.
+  164--180.
+
+\bibitem{wang2018high}
+Ting-Chun Wang, Ming-Yu Liu, Jun-Yan Zhu, Andrew Tao, Jan Kautz, and Bryan
+  Catanzaro,
+\newblock ``High-resolution image synthesis and semantic manipulation with
+  conditional gans,''
+\newblock in {\em IEEE Conference on Computer Vision and Pattern Recognition
+  (CVPR)}, 2018, pp. 8798--8807.
+
+\bibitem{saharia2022palette}
+Chitwan Saharia, William Chan, Huiwen Chang, Chris Lee, Jonathan Ho, Tim
+  Salimans, David Fleet, and Mohammad Norouzi,
+\newblock ``Palette: Image-to-image diffusion models,''
+\newblock in {\em ACM SIGGRAPH}, 2022, pp. 1--10.
+
+\bibitem{hradis2015convolutional}
+Michal Hradis, Jan Kotera, Pavel Zemcik, and Filip Sroubek,
+\newblock ``Convolutional neural networks for direct text deblurring,''
+\newblock in {\em British Machine Vision Conference (BMVC)}, 2015.
+
+\bibitem{tensmeyer2017document}
+Chris Tensmeyer and Tony Martinez,
+\newblock ``Document image binarization with fully convolutional neural
+  networks,''
+\newblock in {\em International Conference on Document Analysis and Recognition
+  (ICDAR)}, 2017, pp. 99--104.
+
+\bibitem{sharma2018understanding}
+Abhay Sharma,
+\newblock {\em Understanding Color Management},
+\newblock Wiley, Hoboken, NJ, USA, 2nd edition, 2018.
+
+\bibitem{johnson2016perceptual}
+Justin Johnson, Alexandre Alahi, and Li~Fei-Fei,
+\newblock ``Perceptual losses for real-time style transfer and
+  super-resolution,''
+\newblock in {\em European Conference on Computer Vision (ECCV)}, 2016, pp.
+  694--711.
+
+\bibitem{kaggle2013cats}
+Kaggle,
+\newblock ``Dogs vs. cats,'' \url{https://www.kaggle.com/c/dogs-vs-cats}, 2013.
+
+\bibitem{wang2004ssim}
+Zhou Wang, Alan~C. Bovik, Hamid~R. Sheikh, and Eero~P. Simoncelli,
+\newblock ``Image quality assessment: From error visibility to structural
+  similarity,''
+\newblock {\em IEEE Transactions on Image Processing}, vol. 13, no. 4, pp.
+  600--612, 2004.
+
+\bibitem{zhang2018lpips}
+Richard Zhang, Phillip Isola, Alexei~A. Efros, Eli Shechtman, and Oliver Wang,
+\newblock ``The unreasonable effectiveness of deep features as a perceptual
+  metric,''
+\newblock in {\em IEEE Conference on Computer Vision and Pattern Recognition
+  (CVPR)}, 2018, pp. 586--595.
+
+\bibitem{reinhard2001color}
+Erik Reinhard, Michael Adhikhmin, Bruce Gooch, and Peter Shirley,
+\newblock ``Color transfer between images,''
+\newblock {\em IEEE Computer Graphics and Applications}, vol. 21, no. 5, pp.
+  34--41, 2001.
+
+\end{thebibliography}
