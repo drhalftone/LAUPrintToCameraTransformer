@@ -16,7 +16,7 @@
 
 \begin{document}
 
-\title{Print-to-Camera Image Restoration Using Conditional Adversarial Networks}
+\title{Comparing CNN Architectures for Print-to-Camera Image Restoration}
 
 \author{\IEEEauthorblockN{Daniel L. Lau}
 \IEEEauthorblockA{\textit{Department of Electrical and Computer Engineering} \\
@@ -27,11 +27,11 @@ dllau@uky.edu}}
 \maketitle
 
 \begin{abstract}
-Machine vision systems used in print quality inspection face a fundamental challenge: camera-captured images of printed materials exhibit systematic degradations including color shifts, reduced contrast, and scanning artifacts that differ from the original digital source images. This paper presents a deep learning approach using conditional generative adversarial networks (cGANs) to transform raw camera captures back to their original digital appearance. We implement a U-Net based pix2pix architecture with perceptual loss to learn the inverse mapping from captured print images to pristine originals. Our bidirectional training framework enables both forward modeling (predicting print appearance) and reverse restoration (recovering original quality). Experimental results on paired print-capture datasets demonstrate effective artifact removal and color restoration, achieving 26.65 dB PSNR and 0.75 SSIM---an 8.6 dB improvement over the best traditional baseline. The system processes 512$\times$512 images in real-time and requires only 35 minutes of training on consumer hardware.
+Machine vision systems used in print quality inspection face a fundamental challenge: camera-captured images of printed materials exhibit systematic degradations including color shifts, reduced contrast, and scanning artifacts that differ from the original digital source images. This paper compares two convolutional neural network architectures for learning the inverse mapping from captured print images to pristine originals: (1) a conditional GAN using the pix2pix framework with U-Net generator, perceptual loss, and adversarial training, and (2) NAFNet, a recent activation-free architecture designed for image restoration. Experimental results on a dataset of 16,193 paired print-capture images demonstrate that pix2pix achieves 26.65~dB PSNR and 0.75 SSIM, outperforming NAFNet (24.54~dB PSNR, 0.74 SSIM) and traditional baselines by significant margins. Both deep learning approaches substantially exceed traditional color transfer methods, with pix2pix providing an 8.6~dB improvement over the best conventional baseline. Our findings suggest that adversarial training provides meaningful benefits for this domain adaptation task.
 \end{abstract}
 
 \begin{IEEEkeywords}
-image-to-image translation, generative adversarial networks, print quality inspection, machine vision, U-Net
+image-to-image translation, generative adversarial networks, NAFNet, print quality inspection, machine vision
 \end{IEEEkeywords}
 
 \section{Introduction}
@@ -42,13 +42,15 @@ These degradations arise from multiple sources in the imaging chain. The printin
 
 Traditional approaches to this problem include color calibration using reference targets, image registration with geometric correction, and histogram-based color mapping. However, these methods address individual degradations in isolation and struggle to model the complex, nonlinear interactions between printing and capture artifacts. Furthermore, they require manual tuning and domain expertise to achieve acceptable results.
 
-We propose a data-driven approach using conditional generative adversarial networks (cGANs) to learn the complete inverse transformation from captured images to original digital sources (Fig.~\ref{fig:pipeline}). By training on paired examples of original images and their printed-captured counterparts, our model learns to jointly correct all degradations without explicit modeling of individual artifact sources.
+We propose a data-driven approach using deep convolutional neural networks to learn the complete inverse transformation from captured images to original digital sources (Fig.~\ref{fig:pipeline}). By training on paired examples of original images and their printed-captured counterparts, these models learn to jointly correct all degradations without explicit modeling of individual artifact sources.
+
+This paper compares two representative CNN architectures for this task: (1) pix2pix~\cite{isola2017image}, a conditional GAN combining a U-Net generator with adversarial and perceptual losses, and (2) NAFNet~\cite{chen2022nafnet}, a recent activation-free architecture that achieved state-of-the-art results on standard image restoration benchmarks. These architectures represent different design philosophies: pix2pix leverages adversarial training to produce perceptually realistic outputs, while NAFNet uses a simplified feedforward design optimized for reconstruction accuracy.
 
 Our key contributions are:
 \begin{itemize}
-\item A bidirectional pix2pix framework for print-to-camera image transformation that supports both artifact simulation (forward) and quality restoration (reverse)
-\item Integration of perceptual loss with adversarial training to preserve fine details and produce visually coherent results
-\item Demonstration of effective training on modest hardware with limited paired data
+\item A comparative evaluation of GAN-based and non-GAN CNN architectures for print-to-camera image restoration
+\item Demonstration that adversarial training provides measurable benefits for this domain adaptation task
+\item A bidirectional framework supporting both artifact simulation (forward) and quality restoration (reverse)
 \end{itemize}
 
 \section{Related Work}
@@ -101,6 +103,10 @@ CycleGAN~\cite{zhu2017unpaired} extended this paradigm to unpaired training usin
 
 Recent advances include attention mechanisms~\cite{chen2018attention}, multi-scale discriminators~\cite{wang2018high}, and diffusion-based approaches~\cite{saharia2022palette}. However, the original pix2pix architecture remains effective for applications with well-aligned paired data.
 
+\subsection{Image Restoration Networks}
+
+Beyond GAN-based approaches, recent work has explored simplified architectures for image restoration. NAFNet (Nonlinear Activation Free Network)~\cite{chen2022nafnet} demonstrated that state-of-the-art results on denoising and deblurring benchmarks can be achieved without traditional nonlinear activations like ReLU. Instead, NAFNet uses element-wise multiplication (gating) as its only nonlinearity, combined with simplified channel attention. This design achieves competitive performance with reduced computational complexity. We include NAFNet in our comparison to evaluate whether these architectural simplifications transfer to the print-capture restoration domain.
+
 \subsection{Print Quality and Document Analysis}
 
 Document image enhancement has been extensively studied for applications including OCR preprocessing and historical document restoration. Hradis et al.~\cite{hradis2015convolutional} applied convolutional networks to document deblurring. More recent work has explored end-to-end learning for document binarization~\cite{tensmeyer2017document} and degradation removal~\cite{souibgui2020gan}.
@@ -119,7 +125,9 @@ Let $\mathbf{x} \in \mathbb{R}^{H \times W \times 3}$ denote an original digital
 
 For bidirectional modeling, we also train a forward model $G_f: \mathbf{x} \rightarrow \mathbf{y}$ that predicts how images will appear after printing and capture. Both models share identical architectures but are trained on data with swapped input-target roles.
 
-\subsection{Network Architecture}
+\subsection{Network Architectures}
+
+We compare two CNN architectures that share a common encoder-decoder structure with skip connections but differ significantly in their design philosophy and training methodology.
 
 \begin{figure}[t]
 \centering
@@ -184,11 +192,11 @@ For bidirectional modeling, we also train a forward model $G_f: \mathbf{x} \righ
 
 \end{tikzpicture}%
 }
-\caption{U-Net generator architecture. Blue blocks: encoder (downsampling). Red: bottleneck. Green: decoder (upsampling). Dashed lines: skip connections preserving spatial detail.}
+\caption{Encoder-decoder architecture shared by both models. Blue: encoder (downsampling). Red: bottleneck. Green: decoder (upsampling). Dashed lines: skip connections. Pix2Pix uses channel concatenation for skips; NAFNet uses addition.}
 \label{fig:unet}
 \end{figure}
 
-\subsubsection{U-Net Generator}
+\subsubsection{Pix2Pix: U-Net Generator with GAN}
 
 Our generator follows the U-Net architecture with symmetric encoder-decoder structure and skip connections (Fig.~\ref{fig:unet}). The encoder consists of four downsampling blocks that progressively extract features at resolutions 512, 256, 128, and 64 pixels. Each block applies two 3$\times$3 convolutions with batch normalization and LeakyReLU activation (slope 0.2), followed by 2$\times$2 max pooling.
 
@@ -201,6 +209,14 @@ The final layer is a 1$\times$1 convolution producing 3-channel RGB output. The 
 The discriminator follows the PatchGAN design that classifies 70$\times$70 overlapping patches rather than the entire image. This approach provides dense gradient signal and captures high-frequency structure effectively.
 
 The discriminator receives concatenated input and target images (6 channels) and applies four convolutional blocks with stride 2, expanding channels from 64 to 512. Batch normalization is omitted in the first layer. The final layer outputs a spatial map of patch classifications.
+
+\subsubsection{NAFNet: Activation-Free Restoration Network}
+
+NAFNet~\cite{chen2022nafnet} takes a different approach, eliminating traditional nonlinear activations entirely. The architecture uses a similar encoder-decoder structure with four resolution levels, but replaces ReLU/LeakyReLU with SimpleGate---a parameter-free operation that splits channels in half and multiplies them element-wise. This gating mechanism provides nonlinearity without explicit activation functions.
+
+Each NAFBlock consists of: (1) layer normalization, (2) depthwise convolution for spatial mixing, (3) SimpleGate activation, (4) simplified channel attention (global average pooling followed by a linear projection), and (5) a feedforward network with another SimpleGate. Learnable scaling parameters ($\beta$) modulate residual connections.
+
+Unlike pix2pix, NAFNet uses additive skip connections rather than concatenation, and is trained with L1 loss only---no adversarial or perceptual losses. The model contains approximately 17 million parameters (versus 31M for pix2pix). This simplified design achieved state-of-the-art results on SIDD denoising and GoPro deblurring benchmarks.
 
 \subsection{Loss Functions}
 
@@ -286,13 +302,15 @@ We evaluate our model on the validation set (1,619 images) using three standard 
 
 \begin{table}[t]
 \centering
-\caption{Quantitative Comparison on Validation Set}
+\caption{Quantitative Comparison on Validation Set (1,619 images)}
 \label{tab:quantitative}
 \begin{tabular}{lccc}
 \toprule
 Method & PSNR (dB) $\uparrow$ & SSIM $\uparrow$ & LPIPS $\downarrow$ \\
 \midrule
-\textbf{Pix2Pix (Ours)} & \textbf{26.65} & \textbf{0.7454} & \textbf{0.2483} \\
+\textbf{Pix2Pix} & \textbf{26.65} & \textbf{0.7454} & \textbf{0.2483} \\
+NAFNet & 24.54 & 0.7386 & 0.3352 \\
+\midrule
 Channel Regression & 18.07 & 0.4244 & 0.5445 \\
 Histogram Matching & 16.79 & 0.3210 & 0.6099 \\
 Reinhard Color Transfer & 16.43 & 0.3998 & 0.5856 \\
@@ -301,9 +319,9 @@ Identity & 10.59 & 0.1962 & 0.5899 \\
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:quantitative} shows that our method significantly outperforms all baselines across all metrics. Compared to the best traditional baseline (Channel Regression), our model achieves an 8.6 dB improvement in PSNR, a 0.32 improvement in SSIM, and a 0.30 reduction in LPIPS. The large gap between Identity and other methods confirms the substantial degradation introduced by the print-capture process. Traditional color transfer methods partially address color shifts but fail to restore fine details and texture, as evidenced by their high LPIPS scores.
+Table~\ref{tab:quantitative} shows that both deep learning methods substantially outperform traditional baselines, with pix2pix achieving the best results across all metrics. Compared to NAFNet, pix2pix provides a 2.1~dB improvement in PSNR and a significant 0.087 reduction in LPIPS (lower is better), while SSIM scores are comparable (0.745 vs 0.739). This suggests that adversarial training contributes meaningfully to perceptual quality for this task.
 
-The L1 reconstruction loss decreases consistently during training, from approximately 0.35 at initialization to 0.10 at convergence. The smooth loss curve indicates stable training without mode collapse or oscillation, validating our choice of loss weights and optimization parameters.
+Both CNN methods dramatically outperform traditional approaches. Compared to the best traditional baseline (Channel Regression), pix2pix achieves an 8.6~dB improvement in PSNR, while even NAFNet provides a 6.5~dB improvement. The large gap between Identity and other methods confirms the substantial degradation introduced by the print-capture process. Traditional color transfer methods partially address color shifts but fail to restore fine details and texture, as evidenced by their high LPIPS scores.
 
 \subsubsection{Qualitative Analysis}
 
@@ -377,11 +395,13 @@ Memory usage during training peaks at approximately 6-8GB with batch size 4, mak
 
 \section{Conclusion}
 
-We presented a conditional GAN approach for restoring machine vision camera captures of printed images to their original digital quality. The pix2pix architecture with U-Net generator and PatchGAN discriminator, combined with perceptual and adversarial losses, effectively learns the inverse print-capture transformation from paired training data. Quantitative evaluation demonstrates significant improvements over traditional baselines, achieving 26.65 dB PSNR and 0.75 SSIM compared to 18.07 dB and 0.42 for the best traditional method.
+We presented a comparative evaluation of two CNN architectures for restoring machine vision camera captures of printed images to their original digital quality. Our experiments demonstrate that pix2pix, combining a U-Net generator with PatchGAN discriminator and perceptual losses, outperforms NAFNet on this task despite NAFNet's strong performance on standard image restoration benchmarks. Pix2pix achieves 26.65~dB PSNR and 0.75 SSIM compared to NAFNet's 24.54~dB and 0.74, with the most notable difference in perceptual quality (LPIPS: 0.25 vs 0.34).
 
-Our bidirectional framework supports both quality restoration and degradation simulation, enabling applications in print inspection, color management, and data augmentation. The system trains efficiently on consumer hardware and processes images in real-time, making it practical for industrial deployment.
+These results suggest that adversarial training provides meaningful benefits for print-capture restoration, likely because the task involves domain adaptation rather than simple noise removal. The discriminator helps the generator learn the specific characteristics of the target domain (original digital images) beyond what pixel-wise losses alone can capture.
 
-Future work includes extending the approach to higher resolutions, investigating unpaired training with cycle-consistency for scenarios where paired data is unavailable, and incorporating explicit modeling of known degradation sources such as halftone patterns and illumination gradients.
+Both deep learning approaches dramatically outperform traditional color transfer methods, confirming that learned representations are essential for modeling the complex, nonlinear degradations in the print-capture pipeline. The system trains efficiently on consumer hardware and processes images in real-time, making it practical for industrial deployment.
+
+Future work includes investigating whether hybrid approaches combining NAFNet's efficient architecture with adversarial training could achieve the best of both worlds, and extending evaluation to different printing technologies and capture conditions.
 
 \section*{Acknowledgment}
 
@@ -415,6 +435,8 @@ The authors thank the anonymous reviewers for their constructive feedback.
 \bibitem{zhang2018lpips} R. Zhang, P. Isola, A. A. Efros, E. Shechtman, and O. Wang, ``The unreasonable effectiveness of deep features as a perceptual metric,'' in \textit{Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, 2018, pp. 586--595. [Online]. Available: https://arxiv.org/abs/1801.03924
 
 \bibitem{reinhard2001color} E. Reinhard, M. Adhikhmin, B. Gooch, and P. Shirley, ``Color transfer between images,'' \textit{IEEE Comput. Graph. Appl.}, vol. 21, no. 5, pp. 34--41, Sep./Oct. 2001. [Online]. Available: https://ieeexplore.ieee.org/document/946629
+
+\bibitem{chen2022nafnet} L. Chen, X. Chu, X. Zhang, and J. Sun, ``Simple baselines for image restoration,'' in \textit{Proc. Eur. Conf. Comput. Vis. (ECCV)}, 2022, pp. 17--33. [Online]. Available: https://arxiv.org/abs/2204.04676
 \end{thebibliography}
 
 \end{document}
